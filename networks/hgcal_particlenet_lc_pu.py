@@ -32,4 +32,4 @@ def get_model(data_config, **kwargs):
 
 
 def get_loss(data_config, **kwargs):
-    return torch.nn.Softmax()
+    return torch.nn.CrossEntropyLoss()

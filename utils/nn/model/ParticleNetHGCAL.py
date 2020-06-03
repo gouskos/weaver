@@ -195,7 +195,8 @@ class ParticleNet(nn.Module):
         #    x = fts.sum(dim=-1) / counts  # divide by the real counts
         #else:
         #    x = fts.mean(dim=-1)
-        output = self.fc(x)
+        #output = self.fc(x)
+        output = x
         if self.for_inference:
             output = torch.softmax(output, dim=1)
 #         print('output:\n', output)

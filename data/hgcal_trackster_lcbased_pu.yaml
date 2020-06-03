@@ -7,7 +7,7 @@ new_variables:
    ### [format] name: formula
    ### can use functions from `math`, `np` (numpy), and `awkward` in the expression
    lccand_mask: awkward.JaggedArray.ones_like(lc_eta)
-   label_lc: lc_isPU   
+   label_lc: lc_hits_energy_from_cp   
 
 inputs:
    lc_points:
@@ -15,16 +15,15 @@ inputs:
       vars: 
          - lc_x
          - lc_y
-	 - lc_z
+         - lc_z
    lc_features:
       length: 100
       vars: 
       ### [format 1]: var_name (no transformation)
       ### [format 2]: [var_name, subtract_by(optional, default=None, no transf.), multiply_by(optional, default=1), clip_min(optional, default=-5), clip_max(optional, default=5), pad_value(optional, default=0)]
-         - lc_r
-	 - lc_releta
-	 - lc_relphi
-	 - lc_nrechits
+         - lc_eta
+         - lc_phi
+         - lc_nrechits
    lc_mask:
       length: 100
       vars: 
@@ -34,20 +33,17 @@ labels:
    ### type can be `simple`, `custom`
    ### [option 1] use `simple` for binary/multi-class classification, then `value` is a list of 0-1 labels
    type: simple
-   value: [ 
-      label_pu, lable_nopu,
-      ]
+   value: [ label_pu, label_nopu ]
    ### [option 2] otherwise use `custom` to define the label, then `value` is a map
    # type: custom
    # value: 
       # target_mass: np.where(fj_isQCD, fj_genjet_sdmass, fj_gen_mass) 
 
 observers:
-   - event_no
-   - trackster_energy
-   - trackster_pt
-   - trackster_eta
-   - trackster_phi
+   - event
+   - ts_raw_energy
+   - ts_eta
+   - ts_phi
    - cp_energy
    - cp_pt
    - cp_eta
@@ -63,7 +59,7 @@ weights:
    reweight_method: flat
    reweight_vars:
       cp_energy: [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000]
-   reweight_classes: [
-      lc_isPU, label_pu, lable_nopu]
+   reweight_classes: [lc_hits_energy_from_cp, label_pu, label_nopu]
+   class_weights: [2, 1, 1]
    reweight_hists:
 
