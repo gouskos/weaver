@@ -1,6 +1,5 @@
 import torch
-from utils.nn.model.ParticleNetHGCAL.py import HGCalPileUpLCBased
-
+from utils.nn.model.ParticleNet import ParticleNet
 
 def get_model(data_config, **kwargs):
     conv_params = [
@@ -9,16 +8,17 @@ def get_model(data_config, **kwargs):
         (16, (256, 256, 256)),
         ]
     fc_params = [(256, 0.1)]
-    use_fusion = True
+    use_fusion = False
 
     lc_features_dims = len(data_config.input_dicts['lc_features'])
     num_classes = len(data_config.label_value)
-    model = HGCalPileUpLCBased(lc_features_dims, num_classes,
+    model = ParticleNet(lc_features_dims, num_classes,
                               conv_params, fc_params,
                               use_fusion=use_fusion,
                               use_fts_bn=kwargs.get('use_fts_bn', True),
                               use_counts=kwargs.get('use_counts', True),
-                              for_inference=kwargs.get('for_inference', False)
+                              for_inference=kwargs.get('for_inference', False),
+                              for_segmentation=True
                               )
 
     model_info = {
