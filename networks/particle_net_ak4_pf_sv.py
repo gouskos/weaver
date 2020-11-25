@@ -4,11 +4,11 @@ from utils.nn.model.ParticleNet import ParticleNetTagger
 
 def get_model(data_config, **kwargs):
     conv_params = [
-        (16, (64, 64, 64)),
-        (16, (128, 128, 128)),
-        (16, (256, 256, 256)),
+        (8, (64, 64, 64)),
+        (8, (96, 96, 96)),
+        (8, (128, 128, 128)),
         ]
-    fc_params = [(256, 0.1)]
+    fc_params = [(128, 0.1)]
     use_fusion = True
 
     pf_features_dims = len(data_config.input_dicts['pf_features'])

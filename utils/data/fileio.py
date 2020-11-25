@@ -1,22 +1,24 @@
-import numpy as np
+import math
 import tqdm
+import traceback
 from .tools import _concat
 from ..logger import _logger
 
 
-def _read_hdf5(filepath, branches, partial_load=None):
+def _read_hdf5(filepath, branches, load_range=None):
     import tables
     tables.set_blosc_max_threads(4)
     with tables.open_file(filepath) as f:
-        outputs = {k:getattr(f.root, k) for k in branches}
-    if partial_load is not None and partial_load != (0, 1):
-        start, stop = np.trunc(np.asfarray(partial_load) * len(outputs[branches[0]]))
+        outputs = {k:getattr(f.root, k)[:] for k in branches}
+    if load_range is not None:
+        start = math.trunc(load_range[0] * len(outputs[branches[0]]))
+        stop = max(start + 1, math.trunc(load_range[1] * len(outputs[branches[0]])))
         for k, v in outputs.items():
             outputs[k] = v[start:stop]
     return outputs
 
 
-def _read_root(filepath, branches, partial_load=None, treename=None):
+def _read_root(filepath, branches, load_range=None, treename=None):
     import uproot
     with uproot.open(filepath) as f:
         if treename is None:
@@ -26,28 +28,31 @@ def _read_root(filepath, branches, partial_load=None, treename=None):
             else:
                 raise RuntimeError('Need to specify `treename` as more than one trees are found in file %s: %s' % (filepath, str(branches)))
         tree = f[treename]
-        if partial_load is not None and partial_load != (0, 1):
-            start, stop = np.trunc(np.asfarray(partial_load) * tree.numentries)
+        if load_range is not None:
+            start = math.trunc(load_range[0] * tree.numentries)
+            stop = max(start + 1, math.trunc(load_range[1] * tree.numentries))
         else:
             start, stop = None, None
         outputs = tree.arrays(branches, namedecode='utf-8', entrystart=start, entrystop=stop)
     return outputs
 
 
-def _read_awkd(filepath, branches, partial_load=None):
+def _read_awkd(filepath, branches, load_range=None):
     import awkward
     with awkward.load(filepath) as f:
         outputs = {k:f[k] for k in branches}
-    if partial_load is not None and partial_load != (0, 1):
-        start, stop = np.trunc(np.asfarray(partial_load) * len(outputs[branches[0]]))
+    if load_range is not None:
+        start = math.trunc(load_range[0] * len(outputs[branches[0]]))
+        stop = max(start + 1, math.trunc(load_range[1] * len(outputs[branches[0]])))
         for k, v in outputs.items():
             outputs[k] = v[start:stop]
     return outputs
 
 
-def _read_files(filelist, branches, partial_load, show_progressbar=False, **kwargs):
+def _read_files(filelist, branches, load_range=None, show_progressbar=False, **kwargs):
     import os
     from collections import defaultdict
+    branches = list(branches)
     table = defaultdict(list)
     if show_progressbar:
         filelist = tqdm.tqdm(filelist)
@@ -57,18 +62,21 @@ def _read_files(filelist, branches, partial_load, show_progressbar=False, **kwar
             raise RuntimeError('File %s of type `%s` is not supported!' % (filepath, ext))
         try:
             if ext == '.h5':
-                a = _read_hdf5(filepath, branches, partial_load=partial_load)
+                a = _read_hdf5(filepath, branches, load_range=load_range)
             elif ext == '.root':
-                a = _read_root(filepath, branches, partial_load=partial_load, treename=kwargs.get('treename', None))
+                a = _read_root(filepath, branches, load_range=load_range, treename=kwargs.get('treename', None))
             elif ext == '.awkd':
-                a = _read_awkd(filepath, branches, partial_load=partial_load)
+                a = _read_awkd(filepath, branches, load_range=load_range)
         except Exception as e:
             a = None
-            _logger.error(str(e))
+            _logger.error('When reading file %s:', filepath)
+            _logger.error(traceback.format_exc())
         if a is not None:
             for name in branches:
                 table[name].append(a[name].astype('float32'))
     table = {name:_concat(arrs) for name, arrs in table.items()}
+    if len(table[branches[0]]) == 0:
+        raise RuntimeError(f'Zero entries loaded when reading files {filelist} with `load_range`={load_range}.')
     return table
 
 

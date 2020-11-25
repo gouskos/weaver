@@ -23,7 +23,7 @@ def get_graph_feature_v1(x, k, idx):
 
     fts = x.transpose(2, 1).reshape(-1, num_dims)  # -> (batch_size, num_points, num_dims) -> (batch_size*num_points, num_dims)
     fts = fts[idx, :].view(batch_size, num_points, k, num_dims)  # neighbors: -> (batch_size*num_points*k, num_dims) -> ...
-    fts = fts.permute(0, 3, 1, 2)  # (batch_size, num_dims, num_points, k)
+    fts = fts.permute(0, 3, 1, 2).contiguous()  # (batch_size, num_dims, num_points, k)
     x = x.view(batch_size, num_dims, num_points, 1).repeat(1, 1, 1, k)
     fts = torch.cat((x, fts - x), dim=1)  # ->(batch_size, 2*num_dims, num_points, k)
     return fts
@@ -39,7 +39,7 @@ def get_graph_feature_v2(x, k, idx):
 
     fts = x.transpose(0, 1).reshape(num_dims, -1)  # -> (num_dims, batch_size, num_points) -> (num_dims, batch_size*num_points)
     fts = fts[:, idx].view(num_dims, batch_size, num_points, k)  # neighbors: -> (num_dims, batch_size*num_points*k) -> ...
-    fts = fts.transpose(1, 0)  # (batch_size, num_dims, num_points, k)
+    fts = fts.transpose(1, 0).contiguous()  # (batch_size, num_dims, num_points, k)
 
     x = x.view(batch_size, num_dims, num_points, 1).repeat(1, 1, 1, k)
     fts = torch.cat((x, fts - x), dim=1)  # ->(batch_size, 2*num_dims, num_points, k)
@@ -180,6 +180,8 @@ class ParticleNet(nn.Module):
 #         print('features:\n', features)
         if mask is None:
             mask = (features.abs().sum(dim=1, keepdim=True) != 0)  # (N, 1, P)
+        points *= mask
+        features *= mask
         coord_shift = (mask == 0) * 1e9
         if self.use_counts:
             counts = mask.float().sum(dim=-1)
@@ -241,9 +243,13 @@ class ParticleNetTagger(nn.Module):
                  use_fusion=True,
                  use_fts_bn=True,
                  use_counts=True,
+                 pf_input_dropout=None,
+                 sv_input_dropout=None,
                  for_inference=False,
                  **kwargs):
         super(ParticleNetTagger, self).__init__(**kwargs)
+        self.pf_input_dropout = nn.Dropout(pf_input_dropout) if pf_input_dropout else None
+        self.sv_input_dropout = nn.Dropout(sv_input_dropout) if sv_input_dropout else None
         self.pf_conv = FeatureConv(pf_features_dims, 32)
         self.sv_conv = FeatureConv(sv_features_dims, 32)
         self.pn = ParticleNet(input_dims=32,
@@ -256,7 +262,16 @@ class ParticleNetTagger(nn.Module):
                               for_inference=for_inference)
 
     def forward(self, pf_points, pf_features, pf_mask, sv_points, sv_features, sv_mask):
+        if self.pf_input_dropout:
+            pf_mask = (self.pf_input_dropout(pf_mask) != 0).float()
+            pf_points *= pf_mask
+            pf_features *= pf_mask
+        if self.sv_input_dropout:
+            sv_mask = (self.sv_input_dropout(sv_mask) != 0).float()
+            sv_points *= sv_mask
+            sv_features *= sv_mask
+
         points = torch.cat((pf_points, sv_points), dim=2)
-        features = torch.cat((self.pf_conv(pf_features) * pf_mask, self.sv_conv(sv_features) * sv_mask), dim=2)
+        features = torch.cat((self.pf_conv(pf_features * pf_mask) * pf_mask, self.sv_conv(sv_features * sv_mask) * sv_mask), dim=2)
         mask = torch.cat((pf_mask, sv_mask), dim=2)
         return self.pn(points, features, mask)

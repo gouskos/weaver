@@ -1,5 +1,7 @@
 import numpy as np
+import awkward
 import tqdm
+import time
 import torch
 
 from collections import defaultdict, Counter
@@ -28,19 +30,17 @@ def _flatten_preds(preds, mask=None, label_axis=1):
     return preds
 
 
-def train(model, loss_func, opt, scheduler, train_loader, dev, use_amp=False):
+def train(model, loss_func, opt, scheduler, train_loader, dev, grad_scaler=None):
     model.train()
 
     data_config = train_loader.dataset.config
-
-    if use_amp:
-        from apex import amp
 
     label_counter = Counter()
     total_loss = 0
     num_batches = 0
     total_correct = 0
     count = 0
+    start_time = time.time()
     with tqdm.tqdm(train_loader) as tq:
         for X, y, _ in tq:
             inputs = [X[k].to(dev) for k in data_config.input_names]
@@ -57,12 +57,13 @@ def train(model, loss_func, opt, scheduler, train_loader, dev, use_amp=False):
             logits = model(*inputs)
             logits = _flatten_preds(logits, label_mask)
             loss = loss_func(logits, label)
-            if use_amp:
-                with amp.scale_loss(loss, opt) as scaled_loss:
-                    scaled_loss.backward()
-            else:
+            if grad_scaler is None:
                 loss.backward()
-            opt.step()
+                opt.step()
+            else:
+                grad_scaler.scale(loss).backward()
+                grad_scaler.step(opt)
+                grad_scaler.update()
 
             _, preds = logits.max(1)
             loss = loss.item()
@@ -79,6 +80,8 @@ def train(model, loss_func, opt, scheduler, train_loader, dev, use_amp=False):
                 'Acc': '%.5f' % (correct / num_examples),
                 'AvgAcc': '%.5f' % (total_correct / count)})
 
+    time_diff = time.time() - start_time
+    _logger.info('Processed %d entries in total (avg. speed %.1f entries/s)' % (count, count / time_diff))
     _logger.info('Train class distribution: \n    %s', str(sorted(label_counter.items())))
     scheduler.step()
 
@@ -91,19 +94,24 @@ def evaluate(model, test_loader, dev, for_training=True, loss_func=None, eval_me
     label_counter = Counter()
     total_loss = 0
     total_correct = 0
+    entry_count = 0
     count = 0
     scores = []
     labels = defaultdict(list)
+    labels_counts = []
     observers = defaultdict(list)
     with torch.no_grad():
         with tqdm.tqdm(test_loader) as tq:
             for X, y, Z in tq:
                 inputs = [X[k].to(dev) for k in data_config.input_names]
                 label = y[data_config.label_names[0]].long()
+                entry_count += label.shape[0]
                 try:
                     label_mask = y[data_config.label_names[0] + '_mask'].bool()
                 except KeyError:
                     label_mask = None
+                if not for_training and label_mask is not None:
+                    labels_counts.append(np.squeeze(label_mask.numpy().sum(axis=-1)))
                 label = _flatten_label(label, label_mask)
                 num_examples = label.shape[0]
                 label_counter.update(label.cpu().numpy())
@@ -111,9 +119,9 @@ def evaluate(model, test_loader, dev, for_training=True, loss_func=None, eval_me
                 logits = model(*inputs)
                 logits = _flatten_preds(logits, label_mask)
 
-                scores.append(torch.softmax(logits, dim=1).cpu().detach().numpy())
+                scores.append(torch.softmax(logits, dim=1).detach().cpu().numpy())
                 for k, v in y.items():
-                    labels[k].append(v.cpu().numpy())
+                    labels[k].append(_flatten_label(v, label_mask).cpu().numpy())
                 if not for_training:
                     for k, v in Z.items():
                         observers[k].append(v.cpu().numpy())
@@ -135,14 +143,26 @@ def evaluate(model, test_loader, dev, for_training=True, loss_func=None, eval_me
     _logger.info('Evaluation class distribution: \n    %s', str(sorted(label_counter.items())))
 
     scores = np.concatenate(scores)
-    labels = {k:_concat(v) for k, v in labels.items()}
+    labels = {k: _concat(v) for k, v in labels.items()}
     metric_results = evaluate_metrics(labels[data_config.label_names[0]], scores, eval_metrics=eval_metrics)
     _logger.info('Evaluation metrics: \n%s', '\n'.join(['    - %s: \n%s' % (k, str(v)) for k, v in metric_results.items()]))
 
     if for_training:
         return total_correct / count
     else:
-        observers = {k:_concat(v) for k, v in observers.items()}
+        # convert 2D labels/scores
+        if len(scores) != entry_count:
+            if len(labels_counts):
+                labels_counts = np.concatenate(labels_counts)
+                scores = awkward.JaggedArray.fromcounts(labels_counts, scores)
+                for k, v in labels.items():
+                    labels[k] = awkward.JaggedArray.fromcounts(labels_counts, v)
+            else:
+                assert(count % entry_count == 0)
+                scores = scores.reshape((entry_count, int(count / entry_count), -1)).transpose((1, 2))
+                for k, v in labels.items():
+                    labels[k] = v.reshape((entry_count, -1))
+        observers = {k: _concat(v) for k, v in observers.items()}
         return total_correct / count, scores, labels, observers
 
 
