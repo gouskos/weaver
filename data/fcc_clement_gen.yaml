@@ -14,7 +14,7 @@ new_variables:
    ### can use functions from `math`, `np` (numpy), and `awkward` in the expression
    #pfcand_mask: awkward.JaggedArray.ones_like(pfcand_etarel)
    #sv_mask: awkward.JaggedArray.ones_like(sv_etarel)
-   pfcand_mask: awkward.JaggedArray.ones_like(MC_mass)
+   MC_mask: awkward.JaggedArray.ones_like(MC_e)
    
 preprocess:
   ### method: [manual, auto] - whether to use manually specified parameters for variable standardization
@@ -23,14 +23,17 @@ preprocess:
   ### data_fraction: fraction of events to use when calculating the mean/scale for the standardization
   data_fraction: 0.1
 
+treename:
+  events
+
 inputs:
    pf_points:
       length: 100
       vars: 
-         - MC_px
-         - MC_py
+         - MC_theta
+         - MC_phi
    pf_features:
-      length: 50
+      length: 100
       vars: 
       ### [format 1]: var_name (no transformation)
       ### [format 2]: [var_name, 
@@ -41,7 +44,10 @@ inputs:
       ###              pad_value(optional, default=0)]
          - MC_pdg
          - MC_charge
+         - MC_px
+         - MC_py
          - MC_pz
+         - MC_e
          - MC_mass
    pf_mask:
       length: 100
@@ -53,7 +59,7 @@ labels:
    ### [option 1] use `simple` for binary/multi-class classification, then `value` is a list of 0-1 labels
    type: simple
    value: [
-           isHgg, isZbb, isZcc, isZqq,
+           MC_isHgg, MC_isZbb, MC_isZcc, MC_isZqq,
       ]
    ### [option 2] otherwise use `custom` to define the label, then `value` is a map
    # type: custom
@@ -61,7 +67,7 @@ labels:
       # target_mass: np.where(fj_isQCD, fj_genjet_sdmass, fj_gen_mass) 
 
 observers:
-   - MC_mass
+   #- MC_mass
    #- n_constituents
 
 weights:
@@ -72,13 +78,13 @@ weights:
    use_precomputed_weights: false
    reweight_method: flat
    reweight_vars:
-      MC_px: [-10., 10.]
-      MC_py: [-10., 10.]
+      MC_theta: [-10., 10.]
+      MC_phi: [-10., 10.]
    reweight_classes: [
-      isHgg,
-      isZbb,
-      isZcc,
-      isZqq,
+      MC_isHgg,
+      MC_isZbb,
+      MC_isZcc,
+      MC_isZqq,
       ]
    class_weights: [
       1,
